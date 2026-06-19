@@ -175,6 +175,22 @@ export const sendMessengerUserMessage = async ({
 		throw new Error("Unauthorized");
 	}
 
+	// Rate-limit BEFORE any DB writes so a limited request can't persist a
+	// message row or advance the conversation timestamp (DB spam) — not just
+	// skip the expensive agent reply.
+	const rateLimitSubject =
+		viewer.user?.id ??
+		conversation.userId ??
+		activeAnonymousId ??
+		conversation.anonymousId;
+	if (
+		await isRateLimited(RATE_LIMIT_IDS.MESSENGER_MESSAGE, {
+			...(rateLimitSubject ? { key: `messenger:${rateLimitSubject}` } : {}),
+		})
+	) {
+		throw new Error("Too many messages. Please wait a moment, then try again.");
+	}
+
 	const now = new Date();
 
 	await db()
@@ -213,16 +229,6 @@ export const sendMessengerUserMessage = async ({
 		}).catch(() => undefined);
 		revalidateMessengerPaths(conversationId);
 		return { mode: "human" as const };
-	}
-
-	const rateLimitSubject =
-		effectiveUserId ?? effectiveAnonymousId ?? activeAnonymousId;
-	if (
-		await isRateLimited(RATE_LIMIT_IDS.MESSENGER_MESSAGE, {
-			...(rateLimitSubject ? { key: `messenger:${rateLimitSubject}` } : {}),
-		})
-	) {
-		throw new Error("Too many messages. Please wait a moment, then try again.");
 	}
 
 	const history = await db()

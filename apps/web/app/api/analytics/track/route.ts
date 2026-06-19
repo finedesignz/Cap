@@ -153,11 +153,13 @@ export async function POST(request: NextRequest) {
 
 			// Derive the tenant strictly from the looked-up video record so a
 			// caller cannot spoof another tenant's analytics via body.orgId /
-			// body.ownerId. Uses the video's org id (what every analytics reader
-			// filters tenant_id by); falls back to host/public only when the video
-			// is unknown or not attached to an org.
+			// body.ownerId. Prefer the video's org id (what every analytics reader
+			// filters tenant_id by), then fall back to per-owner scoping, and only
+			// to host/public when the video is unknown.
 			const tenantId =
-				videoRecord?.orgId || (hostname ? `domain:${hostname}` : "public");
+				videoRecord?.orgId ??
+				videoRecord?.ownerId ??
+				(hostname ? `domain:${hostname}` : "public");
 
 			const tinybird = yield* Tinybird;
 			yield* tinybird.appendEvents([
