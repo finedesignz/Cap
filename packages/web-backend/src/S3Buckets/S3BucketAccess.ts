@@ -271,21 +271,30 @@ export const createS3BucketAccess = Effect.gen(function* () {
 		) =>
 			wrapS3Promise(
 				provider.getPublic.pipe(
-					Effect.map((client) =>
-						createPresignedPost(client, {
+					Effect.map((client) => {
+						// Enforce an upper bound on the uploaded object size. The POST
+						// policy rejects the upload at S3 if the body exceeds this,
+						// closing the unbounded-storage hole for presigned POSTs. If a
+						// caller already supplies a content-length-range we defer to it
+						// rather than emitting a second, conflicting range.
+						const callerConditions = args.Conditions ?? [];
+						const hasContentLengthRange = callerConditions.some(
+							(condition) =>
+								Array.isArray(condition) &&
+								condition[0] === "content-length-range",
+						);
+						return createPresignedPost(client, {
 							...args,
-							// Enforce an upper bound on the uploaded object size. The POST
-							// policy rejects the upload at S3 if the body exceeds this,
-							// closing the unbounded-storage hole for presigned POSTs.
-							// Any caller-supplied conditions are preserved.
-							Conditions: [
-								["content-length-range", 0, MAX_UPLOAD_BYTES],
-								...(args.Conditions ?? []),
-							],
+							Conditions: hasContentLengthRange
+								? callerConditions
+								: [
+										["content-length-range", 0, MAX_UPLOAD_BYTES],
+										...callerConditions,
+									],
 							Bucket: provider.bucket,
 							Key: key,
-						}),
-					),
+						});
+					}),
 				),
 			),
 		multipart: {

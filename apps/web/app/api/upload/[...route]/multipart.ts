@@ -4,6 +4,7 @@ import { serverEnv } from "@cap/env";
 import { userIsPro } from "@cap/utils";
 import {
 	Database,
+	MAX_UPLOAD_BYTES,
 	makeCurrentUserLayer,
 	provideOptionalAuth,
 	Storage,
@@ -34,10 +35,6 @@ const MEDIA_SERVER_PRESIGNED_PUT_EXPIRES_SECONDS = 3 * 60 * 60;
 // Clients stop at the cap and then finalize, so reported durations can land
 // slightly past the limit for honest recordings.
 const FREE_PLAN_DURATION_GRACE_SECONDS = 30;
-// Upper bound on a completed multipart upload to prevent unbounded storage
-// abuse. Generous on purpose so legitimate long/high-bitrate recordings are
-// never blocked; kept in sync with MAX_UPLOAD_BYTES in S3BucketAccess.ts.
-const MAX_UPLOAD_BYTES = 100 * 1024 * 1024 * 1024; // 100 GiB
 
 const runPromiseAnyEnv = runPromise as <A, E>(
 	effect: Effect.Effect<A, E, unknown>,
@@ -409,7 +406,11 @@ app.post(
 			// here before persisting (and before paying to assemble it). Part sizes
 			// are client-reported, so this raises the bar rather than enforcing
 			// authoritatively.
-			const totalUploadSize = parts.reduce((acc, part) => acc + part.size, 0);
+			let totalUploadSize = 0;
+			for (const part of parts) {
+				totalUploadSize += part.size;
+				if (totalUploadSize > MAX_UPLOAD_BYTES) break;
+			}
 			if (totalUploadSize > MAX_UPLOAD_BYTES) {
 				// Avoid leaving the parts as incomplete-MPU storage and a stale
 				// videoUploads row, mirroring the free-plan rejection cleanup. The
