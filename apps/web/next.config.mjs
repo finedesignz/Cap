@@ -94,13 +94,33 @@ const nextConfig = {
 					},
 					{
 						key: "X-DNS-Prefetch-Control",
-						value: "on",
+						value: "off",
 					},
 					{
 						key: "Strict-Transport-Security",
 						value: "max-age=63072000; includeSubDomains",
 					},
 				],
+			},
+			// Clickjacking protection for the authenticated/interactive app
+			// surfaces only. Shared videos (/s, /embed) and public collections
+			// (/c) are intentionally embeddable, so X-Frame-Options is NOT applied
+			// to them.
+			{
+				source: "/dashboard/:path*",
+				headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+			},
+			{
+				source: "/onboarding/:path*",
+				headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+			},
+			{
+				source: "/login",
+				headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+			},
+			{
+				source: "/signup",
+				headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
 			},
 		];
 	},
