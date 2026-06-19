@@ -34,6 +34,10 @@ const MEDIA_SERVER_PRESIGNED_PUT_EXPIRES_SECONDS = 3 * 60 * 60;
 // Clients stop at the cap and then finalize, so reported durations can land
 // slightly past the limit for honest recordings.
 const FREE_PLAN_DURATION_GRACE_SECONDS = 30;
+// Upper bound on a completed multipart upload to prevent unbounded storage
+// abuse. Generous on purpose so legitimate long/high-bitrate recordings are
+// never blocked; kept in sync with MAX_UPLOAD_BYTES in S3BucketAccess.ts.
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024 * 1024; // 100 GiB
 
 const runPromiseAnyEnv = runPromise as <A, E>(
 	effect: Effect.Effect<A, E, unknown>,
@@ -397,6 +401,40 @@ app.post(
 							: "Recording exceeds the free plan duration limit. Upgrade to Cap Pro to upload longer recordings.",
 					);
 				}
+			}
+
+			// Server-side backstop for the maximum upload size. Presigned POST URLs
+			// enforce a content-length-range policy, but presigned PUT part URLs
+			// cannot enforce a total size, so reject an oversized assembled upload
+			// here before persisting (and before paying to assemble it). Part sizes
+			// are client-reported, so this raises the bar rather than enforcing
+			// authoritatively.
+			const totalUploadSize = parts.reduce((acc, part) => acc + part.size, 0);
+			if (totalUploadSize > MAX_UPLOAD_BYTES) {
+				// Avoid leaving the parts as incomplete-MPU storage and a stale
+				// videoUploads row, mirroring the free-plan rejection cleanup. The
+				// 413 stands regardless of cleanup success.
+				yield* Effect.gen(function* () {
+					const [bucket] = yield* Storage.getAccessForVideo(video);
+					yield* bucket.multipart.abort(fileKey, uploadId);
+					yield* db.use((db) =>
+						db
+							.delete(Db.videoUploads)
+							.where(eq(Db.videoUploads.videoId, videoId)),
+					);
+				}).pipe(
+					Effect.catchAll((error) =>
+						Effect.logError(
+							"Failed to clean up rejected oversized multipart upload",
+							error,
+						),
+					),
+				);
+
+				c.status(413);
+				return c.text(
+					"Upload exceeds the maximum allowed size and cannot be completed.",
+				);
 			}
 
 			return yield* Effect.gen(function* () {

@@ -14,6 +14,11 @@ import { S3BucketClientProvider } from "./S3BucketClientProvider.ts";
 const DEFAULT_PRESIGNED_GET_EXPIRES_SECONDS = 3600;
 const DEFAULT_PRESIGNED_PUT_EXPIRES_SECONDS = 3600;
 
+// Upper bound on a single upload to prevent unbounded storage abuse. Generous
+// on purpose so legitimate long/high-bitrate recordings are never blocked;
+// tune here if the product ever needs a larger ceiling.
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024 * 1024; // 100 GiB
+
 type NodeReadableWebStream = Parameters<typeof Readable.fromWeb>[0];
 
 const wrapS3Promise = <T>(
@@ -269,6 +274,14 @@ export const createS3BucketAccess = Effect.gen(function* () {
 					Effect.map((client) =>
 						createPresignedPost(client, {
 							...args,
+							// Enforce an upper bound on the uploaded object size. The POST
+							// policy rejects the upload at S3 if the body exceeds this,
+							// closing the unbounded-storage hole for presigned POSTs.
+							// Any caller-supplied conditions are preserved.
+							Conditions: [
+								["content-length-range", 0, MAX_UPLOAD_BYTES],
+								...(args.Conditions ?? []),
+							],
 							Bucket: provider.bucket,
 							Key: key,
 						}),
