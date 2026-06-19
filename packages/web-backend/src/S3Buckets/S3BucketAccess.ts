@@ -274,23 +274,38 @@ export const createS3BucketAccess = Effect.gen(function* () {
 					Effect.map((client) => {
 						// Enforce an upper bound on the uploaded object size. The POST
 						// policy rejects the upload at S3 if the body exceeds this,
-						// closing the unbounded-storage hole for presigned POSTs. If a
-						// caller already supplies a content-length-range we defer to it
-						// rather than emitting a second, conflicting range.
+						// closing the unbounded-storage hole for presigned POSTs. We emit
+						// exactly one content-length-range whose max never exceeds
+						// MAX_UPLOAD_BYTES, even if a caller supplied a looser one, so a
+						// caller can tighten but never raise/disable the cap.
 						const callerConditions = args.Conditions ?? [];
-						const hasContentLengthRange = callerConditions.some(
-							(condition) =>
-								Array.isArray(condition) &&
-								condition[0] === "content-length-range",
+						const isLengthRange = (condition: unknown): boolean =>
+							Array.isArray(condition) &&
+							condition[0] === "content-length-range";
+						const callerRange = callerConditions.find(isLengthRange) as
+							| [unknown, unknown, unknown]
+							| undefined;
+						const callerMin =
+							callerRange && typeof callerRange[1] === "number"
+								? Math.max(0, callerRange[1])
+								: 0;
+						const callerMax =
+							callerRange && typeof callerRange[2] === "number"
+								? callerRange[2]
+								: MAX_UPLOAD_BYTES;
+						const otherConditions = callerConditions.filter(
+							(condition) => !isLengthRange(condition),
 						);
 						return createPresignedPost(client, {
 							...args,
-							Conditions: hasContentLengthRange
-								? callerConditions
-								: [
-										["content-length-range", 0, MAX_UPLOAD_BYTES],
-										...callerConditions,
-									],
+							Conditions: [
+								[
+									"content-length-range",
+									callerMin,
+									Math.min(callerMax, MAX_UPLOAD_BYTES),
+								],
+								...otherConditions,
+							],
 							Bucket: provider.bucket,
 							Key: key,
 						});

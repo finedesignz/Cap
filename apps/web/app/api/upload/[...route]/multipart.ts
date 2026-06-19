@@ -291,7 +291,9 @@ app.post(
 					z.object({
 						partNumber: z.number(),
 						etag: z.string(),
-						size: z.number(),
+						// Non-negative so a negative size can't drag the summed total
+						// below the cap and bypass the upload-size limit.
+						size: z.number().nonnegative(),
 					}),
 				),
 				durationInSecs: stringOrNumberOptional,
@@ -413,16 +415,35 @@ app.post(
 			}
 			if (totalUploadSize > MAX_UPLOAD_BYTES) {
 				// Avoid leaving the parts as incomplete-MPU storage and a stale
-				// videoUploads row, mirroring the free-plan rejection cleanup. The
-				// 413 stands regardless of cleanup success.
+				// videoUploads row, mirroring the free-plan rejection cleanup. Each
+				// step is caught independently so a failed abort doesn't skip the DB
+				// cleanup (and vice versa). The 413 stands regardless of either.
 				yield* Effect.gen(function* () {
 					const [bucket] = yield* Storage.getAccessForVideo(video);
-					yield* bucket.multipart.abort(fileKey, uploadId);
-					yield* db.use((db) =>
-						db
-							.delete(Db.videoUploads)
-							.where(eq(Db.videoUploads.videoId, videoId)),
-					);
+					yield* bucket.multipart
+						.abort(fileKey, uploadId)
+						.pipe(
+							Effect.catchAll((error) =>
+								Effect.logError(
+									"Failed to abort rejected oversized multipart upload",
+									error,
+								),
+							),
+						);
+					yield* db
+						.use((db) =>
+							db
+								.delete(Db.videoUploads)
+								.where(eq(Db.videoUploads.videoId, videoId)),
+						)
+						.pipe(
+							Effect.catchAll((error) =>
+								Effect.logError(
+									"Failed to delete videoUploads row for rejected upload",
+									error,
+								),
+							),
+						);
 				}).pipe(
 					Effect.catchAll((error) =>
 						Effect.logError(
