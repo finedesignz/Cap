@@ -286,12 +286,16 @@ export const createS3BucketAccess = Effect.gen(function* () {
 							| [unknown, unknown, unknown]
 							| undefined;
 						const callerMin =
-							callerRange && typeof callerRange[1] === "number"
+							callerRange &&
+							typeof callerRange[1] === "number" &&
+							Number.isFinite(callerRange[1])
 								? Math.max(0, callerRange[1])
 								: 0;
 						const callerMax =
-							callerRange && typeof callerRange[2] === "number"
-								? callerRange[2]
+							callerRange &&
+							typeof callerRange[2] === "number" &&
+							Number.isFinite(callerRange[2])
+								? Math.max(0, callerRange[2])
 								: MAX_UPLOAD_BYTES;
 						const otherConditions = callerConditions.filter(
 							(condition) => !isLengthRange(condition),

@@ -291,9 +291,10 @@ app.post(
 					z.object({
 						partNumber: z.number(),
 						etag: z.string(),
-						// Non-negative so a negative size can't drag the summed total
-						// below the cap and bypass the upload-size limit.
-						size: z.number().nonnegative(),
+						// A non-negative integer (bytes) so neither a negative nor a
+						// fractional size can drag the summed total below the cap and
+						// bypass the upload-size limit.
+						size: z.number().int().nonnegative(),
 					}),
 				),
 				durationInSecs: stringOrNumberOptional,
