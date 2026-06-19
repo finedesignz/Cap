@@ -25,6 +25,7 @@ import {
 	storeConversationInSupermemory,
 	syncCapKnowledgeBase,
 } from "@/lib/messenger/supermemory";
+import { isRateLimited, RATE_LIMIT_IDS } from "@/lib/rate-limit";
 
 const normalizeContent = (content: string) => content.trim().slice(0, 6000);
 
@@ -212,6 +213,16 @@ export const sendMessengerUserMessage = async ({
 		}).catch(() => undefined);
 		revalidateMessengerPaths(conversationId);
 		return { mode: "human" as const };
+	}
+
+	const rateLimitSubject =
+		effectiveUserId ?? effectiveAnonymousId ?? activeAnonymousId;
+	if (
+		await isRateLimited(RATE_LIMIT_IDS.MESSENGER_MESSAGE, {
+			...(rateLimitSubject ? { key: `messenger:${rateLimitSubject}` } : {}),
+		})
+	) {
+		throw new Error("Too many messages. Please wait a moment, then try again.");
 	}
 
 	const history = await db()

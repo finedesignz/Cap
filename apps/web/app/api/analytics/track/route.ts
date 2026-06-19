@@ -12,6 +12,7 @@ import {
 	createAnonymousViewNotification,
 	sendFirstViewEmail,
 } from "@/lib/Notification";
+import { isRateLimited, RATE_LIMIT_IDS } from "@/lib/rate-limit";
 import { runPromise } from "@/lib/server";
 
 interface TrackPayload {
@@ -51,6 +52,10 @@ export async function POST(request: NextRequest) {
 
 	if (!body?.videoId) {
 		return Response.json({ error: "videoId is required" }, { status: 400 });
+	}
+
+	if (await isRateLimited(RATE_LIMIT_IDS.ANALYTICS_TRACK)) {
+		return Response.json({ error: "Too many requests" }, { status: 429 });
 	}
 
 	const parsedSessionId =
@@ -108,6 +113,7 @@ export async function POST(request: NextRequest) {
 				db()
 					.select({
 						ownerId: videos.ownerId,
+						orgId: videos.orgId,
 						firstViewEmailSentAt: videos.firstViewEmailSentAt,
 						videoName: videos.name,
 						createdAt: videos.createdAt,
@@ -123,6 +129,7 @@ export async function POST(request: NextRequest) {
 					() =>
 						[] as {
 							ownerId: string;
+							orgId: string | null;
 							firstViewEmailSentAt: Date | null;
 							videoName: string;
 							createdAt: Date;
@@ -144,11 +151,13 @@ export async function POST(request: NextRequest) {
 				return;
 			}
 
+			// Derive the tenant strictly from the looked-up video record so a
+			// caller cannot spoof another tenant's analytics via body.orgId /
+			// body.ownerId. Uses the video's org id (what every analytics reader
+			// filters tenant_id by); falls back to host/public only when the video
+			// is unknown or not attached to an org.
 			const tenantId =
-				body.orgId ||
-				videoRecord?.ownerId ||
-				body.ownerId ||
-				(hostname ? `domain:${hostname}` : "public");
+				videoRecord?.orgId || (hostname ? `domain:${hostname}` : "public");
 
 			const tinybird = yield* Tinybird;
 			yield* tinybird.appendEvents([
