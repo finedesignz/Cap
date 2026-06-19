@@ -1,0 +1,110 @@
+name: "Linux build test"
+
+# Manual/branch-triggered smoke test that reproduces the release Linux build
+# (compile + Tauri bundling for deb/rpm/AppImage) without uploading to
+# CrabNebula or Sentry. Useful for de-risking the x86_64-unknown-linux-gnu
+# release target before running the real publish workflow.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/linux-build-test
+
+concurrency:
+  group: linux-build-test-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build desktop (linux)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+      RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read version number
+        uses: SebRollen/toml-action@v1.0.2
+        id: read_version
+        with:
+          file: apps/desktop/src-tauri/Cargo.toml
+          field: "package.version"
+
+      - name: Install Linux desktop dependencies
+        uses: ./.github/actions/install-desktop-deps
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: ./.github/actions/setup-rust-cache
+        with:
+          target: x86_64-unknown-linux-gnu
+
+      - uses: ./.github/actions/setup-js
+
+      - name: Create .env file in root
+        shell: bash
+        run: |
+          {
+            echo "appVersion=${{ steps.read_version.outputs.value }}"
+            echo "VITE_ENVIRONMENT=production"
+            echo "CAP_DESKTOP_SENTRY_URL=https://6a3b6a09e6ae976c2ad6fff710e88748@o4506859771527168.ingest.us.sentry.io/4508330917101568"
+            echo "NEXT_PUBLIC_WEB_URL=${{ secrets.NEXT_PUBLIC_WEB_URL }}"
+            echo 'NEXTAUTH_URL=${{ secrets.NEXT_PUBLIC_WEB_URL }}'
+            echo 'VITE_POSTHOG_KEY=${{ secrets.VITE_POSTHOG_KEY }}'
+            echo 'VITE_POSTHOG_HOST=${{ secrets.VITE_POSTHOG_HOST }}'
+            echo 'VITE_SERVER_URL=${{ secrets.NEXT_PUBLIC_WEB_URL }}'
+            echo 'RUST_TARGET_TRIPLE=x86_64-unknown-linux-gnu'
+          } >> .env
+
+      - name: Run cap-setup
+        shell: bash
+        run: pnpm -w cap-setup
+        env:
+          RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+
+      - name: Build desktop binaries
+        shell: bash
+        run: ./scripts/build-desktop-binaries.sh x86_64-unknown-linux-gnu
+
+      - name: Build app
+        working-directory: apps/desktop
+        run: pnpm build:tauri --target x86_64-unknown-linux-gnu --config src-tauri/tauri.prod.conf.json
+        env:
+          # https://github.com/tauri-apps/tauri-action/issues/740
+          CI: false
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RUST_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+
+      - name: List produced bundles
+        if: always()
+        shell: bash
+        run: |
+          BUNDLE_DIR="target/x86_64-unknown-linux-gnu/release/bundle"
+          echo "Bundle directory: $BUNDLE_DIR"
+          if [ -d "$BUNDLE_DIR" ]; then
+            find "$BUNDLE_DIR" -type f -printf '%10s  %p\n' | sort -k2
+          else
+            echo "No bundle directory was produced."
+          fi
+
+      - name: Upload Linux bundles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop-bundles
+          path: |
+            target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
+            target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+            target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
+          if-no-files-found: warn
