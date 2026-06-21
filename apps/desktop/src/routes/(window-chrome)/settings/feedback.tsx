@@ -18,6 +18,8 @@ import {
 import { apiClient, protectedHeaders } from "~/utils/web-api";
 import { Section, SettingsPageContent } from "./Setting";
 
+const MAX_PROFILE_NOTE_LENGTH = 4000;
+
 function formatBytes(bytes: number): string {
 	if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
 	const units = ["B", "KB", "MB", "GB", "TB"];
@@ -111,17 +113,18 @@ export default function FeedbackTab() {
 		}
 	};
 
+	let currentUnlisten: (() => void) | undefined;
+
 	const handleSendProfile = async () => {
 		setSendingProfile(true);
 		setProfileResult(null);
 		setProfileProgress(null);
 
-		let unlisten: (() => void) | undefined;
 		try {
-			unlisten = await events.sessionProfileProgress.listen((event) =>
+			currentUnlisten = await events.sessionProfileProgress.listen((event) =>
 				setProfileProgress(event.payload),
 			);
-			const note = profileNote().trim();
+			const note = profileNote().trim().slice(0, MAX_PROFILE_NOTE_LENGTH);
 			const result = await commands.uploadSessionProfile(note || null);
 			setProfileResult(result);
 			setProfileNote("");
@@ -134,13 +137,18 @@ export default function FeedbackTab() {
 					: "Failed to send session profile. Please try again.",
 			);
 		} finally {
-			unlisten?.();
+			currentUnlisten?.();
+			currentUnlisten = undefined;
 			setProfileProgress(null);
 			setSendingProfile(false);
 		}
 	};
 
-	onCleanup(() => setProfileProgress(null));
+	onCleanup(() => {
+		currentUnlisten?.();
+		currentUnlisten = undefined;
+		setProfileProgress(null);
+	});
 
 	return (
 		<div class="cap-settings-page flex flex-col w-full h-full custom-scroll">
@@ -254,6 +262,7 @@ export default function FeedbackTab() {
 									value={profileNote()}
 									onInput={(e) => setProfileNote(e.currentTarget.value)}
 									disabled={sendingProfile()}
+									maxLength={MAX_PROFILE_NOTE_LENGTH}
 									placeholder="Optional: describe the bug or what you were doing when it happened..."
 									class="p-2 w-full h-24 text-[13px] rounded-md border transition-colors duration-200 resize-none bg-gray-2 placeholder:text-gray-10 border-gray-3 text-primary focus:outline-hidden focus:ring-1 focus:ring-gray-8 hover:border-gray-6 disabled:opacity-50"
 								/>
