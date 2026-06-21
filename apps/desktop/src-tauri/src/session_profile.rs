@@ -37,6 +37,13 @@ const STUDIO_DIR: &str = "studio";
 const INSTANT_DIR: &str = "instant";
 const ZIP_LARGE_FILE_THRESHOLD: u64 = u32::MAX as u64;
 const ZIP_COPY_BUFFER_SIZE: usize = 1024 * 1024;
+/// Upper bound on the combined size of the recordings we will bundle. Keeps us
+/// from filling the user's temp disk and attempting a multi-GB upload.
+const MAX_SESSION_PROFILE_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+const GIB: u64 = 1024 * 1024 * 1024;
+/// Mirrors the `note` length limit enforced by the web notify endpoint so an
+/// over-long note can't fail the request after the bundle is already uploaded.
+const MAX_NOTE_LENGTH: usize = 4000;
 
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -163,8 +170,8 @@ struct TempFileGuard(PathBuf);
 
 impl Drop for TempFileGuard {
     fn drop(&mut self) {
-        if self.0.exists()
-            && let Err(err) = std::fs::remove_file(&self.0)
+        if let Err(err) = std::fs::remove_file(&self.0)
+            && err.kind() != std::io::ErrorKind::NotFound
         {
             warn!(error = %err, path = %self.0.display(), "Failed to clean up session profile bundle");
         }
@@ -614,6 +621,18 @@ async fn run_upload(
         return Err("No Studio or Instant recordings found to profile.".to_string());
     }
 
+    let total_source_bytes: u64 = recordings
+        .iter()
+        .map(|recording| recording.size_bytes as u64)
+        .sum();
+    if total_source_bytes > MAX_SESSION_PROFILE_BYTES {
+        return Err(format!(
+            "These recordings are too large to share automatically ({:.1} GB). The session profile limit is {} GB \u{2014} please share a shorter recording or send the files to us directly.",
+            total_source_bytes as f64 / GIB as f64,
+            MAX_SESSION_PROFILE_BYTES / GIB
+        ));
+    }
+
     let is_recording = {
         let app_lock = app.state::<crate::ArcLock<crate::App>>();
         let state = app_lock.read().await;
@@ -799,11 +818,11 @@ pub async fn upload_session_profile(
     note: Option<String>,
 ) -> Result<SessionProfileUploadResult, String> {
     let note = note.and_then(|value| {
-        let trimmed = value.trim();
+        let trimmed: String = value.trim().chars().take(MAX_NOTE_LENGTH).collect();
         if trimmed.is_empty() {
             None
         } else {
-            Some(trimmed.to_string())
+            Some(trimmed)
         }
     });
 
