@@ -103,7 +103,11 @@ export const authOptions = (): NextAuthOptions => {
 					async sendVerificationRequest({ identifier, token }) {
 						console.log("sendVerificationRequest");
 
-						if (!serverEnv().RESEND_API_KEY) {
+						const emailConfigured =
+							!!serverEnv().RESEND_API_KEY ||
+							(!!serverEnv().E4A_API_KEY && !!serverEnv().E4A_FROM_INBOX_ID);
+
+						if (!emailConfigured) {
 							console.log("\n");
 							console.log(
 								"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
