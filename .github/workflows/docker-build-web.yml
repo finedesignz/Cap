@@ -108,3 +108,5 @@ jobs:
         run: |
           docker buildx imagetools create -t ghcr.io/${{ env.REPOSITORY_OWNER }}/cap-web:${{ inputs.tag || 'latest' }} \
             $(find /tmp/digests -type f -not -path "*/\.*" -exec basename {} \; | xargs -I {} echo "ghcr.io/${{ env.REPOSITORY_OWNER }}/cap-web@sha256:{}")
+
+# (registration touch d556125f4)
