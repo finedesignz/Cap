@@ -30,6 +30,19 @@ function createServerEnv() {
 			RESEND_API_KEY: z.string().optional(),
 			RESEND_FROM_DOMAIN: z.string().optional(),
 
+			// emails4agents (E4A) — alternative transactional email provider.
+			// When E4A_API_KEY + E4A_FROM_INBOX_ID are set, Cap sends via E4A
+			// instead of Resend (rendered React emails are sent as HTML).
+			E4A_API_KEY: z.string().optional(),
+			E4A_BASE_URL: z
+				.string()
+				.optional()
+				.describe("E4A API base URL, defaults to https://api.emails4agents.com"),
+			E4A_FROM_INBOX_ID: z
+				.string()
+				.optional()
+				.describe("E4A inbox id to send from (from_inbox_id)"),
+
 			/// S3 configuration
 			// Though they are prefixed with `CAP_AWS`, these don't have to be
 			// for AWS, and can instead be for any S3-compatible service
