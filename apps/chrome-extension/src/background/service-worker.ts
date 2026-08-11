@@ -9,6 +9,13 @@ import {
 	isRecordingStatusBroadcast,
 	isServiceWorkerRequest,
 } from "../shared/messages";
+import {
+	attachShareLinkToEvent,
+	parseEvent,
+	queryEventsInWindow,
+} from "../shared/caldav-client";
+import { matchCalendarEvent, matchWindowFor } from "../shared/calendar-match";
+import { detectMeetingUrl } from "../shared/meeting-detect";
 import { rememberRecordingMode } from "../shared/preferences";
 import {
 	clearAuth,
@@ -1237,6 +1244,7 @@ const startRecording = async (mode: RecordingMode) => {
 	}
 	const tab = await getActiveTab();
 	const tabId = tab?.id;
+	const meetingUrl = mode === "tab" ? detectMeetingUrl(tab?.url) : null;
 
 	// Shared mic gate: every start path (panel button and the floating bar)
 	// funnels through here, so the warning is consistent. Run it before any
@@ -1293,6 +1301,7 @@ const startRecording = async (mode: RecordingMode) => {
 			bootstrap,
 			tabId,
 			tabStreamId,
+			meetingUrl,
 		});
 	} catch (error) {
 		// The recorder panel closes as soon as the status leaves "idle", so a
@@ -1838,6 +1847,31 @@ const handleRequest = async (
 	return { ok: false, error: "Unknown request" };
 };
 
+// Best-effort CalDAV auto-link: matches the finished recording to a calendar
+// event and appends the share link via ATTACH. Never throws into the caller
+// — every failure (network, auth, ambiguous/no match, stale etag) is a
+// silent no-op, since this is an enrichment on top of an already-completed
+// upload, not part of the recording-completed UX.
+const linkRecordingToCalendar = async (
+	meetingUrl: string,
+	startedAt: number,
+	durationMs: number,
+	shareUrl: string,
+): Promise<void> => {
+	const settings = await loadSettings();
+	if (!settings.caldav.enabled || !settings.caldav.serverUrl) return;
+
+	const { start, end } = matchWindowFor(startedAt, durationMs);
+	const rawEvents = await queryEventsInWindow(settings.caldav, start, end);
+	const events = rawEvents.map(parseEvent);
+	const match = matchCalendarEvent(events, meetingUrl, startedAt);
+	if (!match) return;
+
+	// A 412 (conflict) result means the event changed since it was read;
+	// treated as skip, not retried.
+	await attachShareLinkToEvent(settings.caldav, match, shareUrl);
+};
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (isRecordingStatusBroadcast(message)) {
 		setRecordingStatusAndBroadcast(message.status);
@@ -1856,6 +1890,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					return updateTab(tabId, shareUrl);
 				})
 				.catch(() => undefined);
+
+			// Fire-and-forget: no existing chrome.notifications permission or
+			// in-extension toast surface for a "linked to <event>" confirmation
+			// (grepped — none), so per plan this stays silent rather than
+			// growing the manifest/adding a dependency for one message.
+			const { meetingUrl, startedAt, durationMs } = message.status;
+			if (meetingUrl && startedAt !== undefined && durationMs !== undefined) {
+				void linkRecordingToCalendar(
+					meetingUrl,
+					startedAt,
+					durationMs,
+					shareUrl,
+				).catch(() => undefined);
+			}
 		}
 		return false;
 	}
