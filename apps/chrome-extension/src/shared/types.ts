@@ -106,6 +106,27 @@ export type MicrophoneWarningSettings = {
 // selected but the offscreen probe heard nothing from it.
 export type MicrophoneWarningVariant = "no-mic" | "no-sound";
 
+// v1 = a single CalDAV calendar collection: `serverUrl` points directly at one
+// calendar collection URL (not a home-set), matching the "one app-password,
+// one calendar" scope of the auto-link feature. Credentials live here in
+// chrome.storage.local, same trust boundary as `authApiKey` (AUTH_KEY).
+export type CalDavSettings = {
+	enabled: boolean;
+	serverUrl: string;
+	username: string;
+	appPassword: string;
+};
+
+// Passive last-result status for the CalDAV auto-link background attempt —
+// surfaced in the Calendar settings section so success/failure isn't silent.
+// `detail` is a short human-readable summary; never the app-password or any
+// credential.
+export type CalendarLinkResult = {
+	at: number;
+	ok: boolean;
+	detail: string;
+};
+
 export type ExtensionSettings = {
 	apiBaseUrl: string;
 	capture: CapturePreferences;
@@ -115,6 +136,7 @@ export type ExtensionSettings = {
 	sounds: SoundSettings;
 	countdown: CountdownSettings;
 	microphoneWarning: MicrophoneWarningSettings;
+	caldav: CalDavSettings;
 };
 
 export type ExtensionAuth = {
@@ -173,6 +195,13 @@ export type RecordingStatus =
 			phase: "completed";
 			videoId: VideoId;
 			shareUrl: string;
+			// Present only for "tab" mode recordings of a detected meeting URL —
+			// carried from ActiveRecording so the service worker (which has no
+			// direct visibility into the offscreen recording) can run the CalDAV
+			// auto-link match without re-deriving it.
+			meetingUrl?: string | null;
+			startedAt?: number;
+			durationMs?: number;
 	  }
 	| {
 			phase: "error";
@@ -196,6 +225,10 @@ export type StartRecordingRequest = {
 	bootstrap: BootstrapData;
 	tabId?: number;
 	tabStreamId?: string;
+	// Detected meeting URL of the recorded tab (Meet/Zoom/Teams), only ever
+	// set for mode === "tab". Threaded into ActiveRecording so it can be
+	// carried back out on the "completed" status for CalDAV auto-link.
+	meetingUrl?: string | null;
 };
 
 export type StopRecordingRequest = {

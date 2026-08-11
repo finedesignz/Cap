@@ -1,6 +1,7 @@
 import { RECORDING_STATE_KEY, SHARED_UI_STATE_KEY } from "./storage-keys";
 import type {
 	BootstrapData,
+	CalendarLinkResult,
 	CapturePreferences,
 	DevicePreference,
 	ExtensionAuth,
@@ -25,6 +26,7 @@ export const WEBCAM_PREVIEW_DISMISSED_KEY =
 	"cap-extension-webcam-preview-dismissed";
 export const MEDIA_ACCESS_KEY = "cap-extension-media-access";
 export const FAILED_RECORDINGS_KEY = "cap-extension-failed-recordings";
+const LAST_CALENDAR_LINK_KEY = "cap-extension-last-calendar-link";
 const OVERLAY_TOKENS_KEY = "cap-extension-overlay-tokens";
 const LAST_WEBCAM_PREVIEW_FRAME_KEY = "cap-extension-last-webcam-preview-frame";
 const PRODUCTION_API_BASE_URL = "https://cap.so";
@@ -88,6 +90,12 @@ export const defaultSettings: ExtensionSettings = {
 	},
 	microphoneWarning: {
 		enabled: true,
+	},
+	caldav: {
+		enabled: false,
+		serverUrl: "",
+		username: "",
+		appPassword: "",
 	},
 };
 
@@ -173,6 +181,7 @@ export const loadSettings = async () => {
 		microphoneWarning: normalizeMicrophoneWarningSettings(
 			saved.microphoneWarning,
 		),
+		caldav: normalizeCalDavSettings(saved.caldav),
 	};
 };
 
@@ -271,6 +280,25 @@ export const loadWebcamPreviewDismissed = async () => {
 
 export const saveWebcamPreviewDismissed = (dismissed: boolean) =>
 	setSession({ [WEBCAM_PREVIEW_DISMISSED_KEY]: dismissed });
+
+const isCalendarLinkResult = (value: unknown): value is CalendarLinkResult => {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Partial<CalendarLinkResult>;
+	return (
+		typeof candidate.at === "number" &&
+		typeof candidate.ok === "boolean" &&
+		typeof candidate.detail === "string"
+	);
+};
+
+export const loadLastCalendarLink = async () => {
+	const result = await getLocal([LAST_CALENDAR_LINK_KEY]);
+	const saved = result[LAST_CALENDAR_LINK_KEY];
+	return isCalendarLinkResult(saved) ? saved : null;
+};
+
+export const saveLastCalendarLink = (result: CalendarLinkResult) =>
+	setLocal({ [LAST_CALENDAR_LINK_KEY]: result });
 
 const MAX_FAILED_RECORDINGS = 5;
 
@@ -505,6 +533,34 @@ export const updateSharedUiState = (
 		await saveSharedUiState(next);
 		return next;
 	});
+
+const normalizeCalDavSettings = (
+	value: unknown,
+): ExtensionSettings["caldav"] => {
+	const caldav =
+		value && typeof value === "object"
+			? (value as Partial<ExtensionSettings["caldav"]>)
+			: {};
+
+	return {
+		enabled:
+			typeof caldav.enabled === "boolean"
+				? caldav.enabled
+				: defaultSettings.caldav.enabled,
+		serverUrl:
+			typeof caldav.serverUrl === "string"
+				? caldav.serverUrl
+				: defaultSettings.caldav.serverUrl,
+		username:
+			typeof caldav.username === "string"
+				? caldav.username
+				: defaultSettings.caldav.username,
+		appPassword:
+			typeof caldav.appPassword === "string"
+				? caldav.appPassword
+				: defaultSettings.caldav.appPassword,
+	};
+};
 
 const isSettings = (value: unknown): value is ExtensionSettings => {
 	if (!value || typeof value !== "object") return false;

@@ -15,6 +15,7 @@ import {
 	loadAuth,
 	loadCachedBootstrap,
 	loadFailedRecordings,
+	loadLastCalendarLink,
 	loadMediaAccessState,
 	loadSettings,
 	MEDIA_ACCESS_KEY,
@@ -24,6 +25,7 @@ import {
 } from "../shared/storage";
 import type {
 	BootstrapData,
+	CalendarLinkResult,
 	CameraDevice,
 	ExtensionAuth,
 	ExtensionSettings,
@@ -34,6 +36,7 @@ import type {
 	RecordingStatus,
 } from "../shared/types";
 import { DEFAULT_MICROPHONE_DEVICE_ID } from "../shared/types";
+import { CalendarSettings } from "./components/calendar-settings";
 import { CameraSelector } from "./components/camera-selector";
 import { DashboardButton } from "./components/dashboard-button";
 import { HowItWorksButton } from "./components/how-it-works-button";
@@ -114,6 +117,8 @@ function App() {
 	const [cameraSelectOpen, setCameraSelectOpen] = useState(false);
 	const [micSelectOpen, setMicSelectOpen] = useState(false);
 	const [failedRecordingsCount, setFailedRecordingsCount] = useState(0);
+	const [lastCalendarLink, setLastCalendarLink] =
+		useState<CalendarLinkResult | null>(null);
 	const settingsRef = useRef(defaultSettings);
 
 	const recordingActive = isRecordingStatus(status);
@@ -277,14 +282,22 @@ function App() {
 			loadAuth(),
 			loadCachedBootstrap(),
 			loadMediaAccessState(),
+			loadLastCalendarLink(),
 		])
 			.then(
-				([cachedSettings, cachedAuth, cachedBootstrap, cachedMediaAccess]) => {
+				([
+					cachedSettings,
+					cachedAuth,
+					cachedBootstrap,
+					cachedMediaAccess,
+					cachedLastCalendarLink,
+				]) => {
 					if (disposed || !cachedAuth) return;
 					applySettings(cachedSettings);
 					setAuth(cachedAuth);
 					setBootstrap(cachedBootstrap);
 					setMediaAccess(cachedMediaAccess);
+					setLastCalendarLink(cachedLastCalendarLink);
 					setBootstrapped(true);
 				},
 			)
@@ -675,6 +688,18 @@ function App() {
 											...settings,
 											systemAudio: { ...settings.systemAudio, enabled },
 										})
+									}
+								/>
+							</div>
+						)}
+						{mode === "tab" && (
+							<div className="cap-fade-up cap-fade-up-4">
+								<CalendarSettings
+									settings={settings.caldav}
+									disabled={recordingActive || busy}
+									lastCalendarLink={lastCalendarLink}
+									onChange={(caldav) =>
+										void updateSettings({ ...settings, caldav })
 									}
 								/>
 							</div>

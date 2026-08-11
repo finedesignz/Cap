@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	type FailedRecording,
 	loadFailedRecordings,
+	loadLastCalendarLink,
 	loadOverlayTokens,
 	loadSharedUiState,
 	registerOverlayToken,
+	saveLastCalendarLink,
 	updateSharedUiState,
 	upsertFailedRecording,
 } from "./storage";
@@ -112,5 +114,25 @@ describe("storage read-modify-write serialization", () => {
 			"session-a",
 			"session-b",
 		]);
+	});
+});
+
+// FIX-8: a passive last-result record so a silent success/failure in the
+// background CalDAV auto-link attempt is visible somewhere.
+describe("lastCalendarLink", () => {
+	it("persists and reloads the last calendar-link attempt result", async () => {
+		expect(await loadLastCalendarLink()).toBeNull();
+
+		await saveLastCalendarLink({
+			at: 1700000000000,
+			ok: true,
+			detail: "Linked to: Team Standup",
+		});
+
+		expect(await loadLastCalendarLink()).toEqual({
+			at: 1700000000000,
+			ok: true,
+			detail: "Linked to: Team Standup",
+		});
 	});
 });

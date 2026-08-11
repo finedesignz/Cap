@@ -9,6 +9,14 @@ import {
 	isRecordingStatusBroadcast,
 	isServiceWorkerRequest,
 } from "../shared/messages";
+import {
+	type AttachResult,
+	attachShareLinkToEvent,
+	parseEvent,
+	queryEventsInWindow,
+} from "../shared/caldav-client";
+import { matchCalendarEvent, matchWindowFor } from "../shared/calendar-match";
+import { detectMeetingUrl } from "../shared/meeting-detect";
 import { rememberRecordingMode } from "../shared/preferences";
 import {
 	clearAuth,
@@ -29,6 +37,7 @@ import {
 	saveAuth,
 	saveAuthError,
 	saveCachedBootstrap,
+	saveLastCalendarLink,
 	savePendingAuth,
 	saveSettings,
 	saveSharedRecordingState,
@@ -1237,6 +1246,7 @@ const startRecording = async (mode: RecordingMode) => {
 	}
 	const tab = await getActiveTab();
 	const tabId = tab?.id;
+	const meetingUrl = mode === "tab" ? detectMeetingUrl(tab?.url) : null;
 
 	// Shared mic gate: every start path (panel button and the floating bar)
 	// funnels through here, so the warning is consistent. Run it before any
@@ -1293,6 +1303,7 @@ const startRecording = async (mode: RecordingMode) => {
 			bootstrap,
 			tabId,
 			tabStreamId,
+			meetingUrl,
 		});
 	} catch (error) {
 		// The recorder panel closes as soon as the status leaves "idle", so a
@@ -1838,6 +1849,93 @@ const handleRequest = async (
 	return { ok: false, error: "Unknown request" };
 };
 
+// Human-readable summary for the passive lastCalendarLink status surfaced in
+// the Calendar settings section — never includes the app-password or any
+// other credential.
+const describeAttachResult = (
+	result: AttachResult,
+	summary: string | null,
+): { ok: boolean; detail: string } => {
+	switch (result) {
+		case "attached":
+			return {
+				ok: true,
+				detail: summary ? `Linked to: ${summary}` : "Linked to event",
+			};
+		case "conflict":
+			return { ok: false, detail: "Event changed since read (skipped)" };
+		case "blocked-off-origin":
+			return { ok: false, detail: "Blocked: off-origin target" };
+		case "blocked-off-path":
+			return { ok: false, detail: "Blocked: off-origin target" };
+		case "blocked-no-etag":
+			return {
+				ok: false,
+				detail: "Blocked: server did not provide an etag",
+			};
+		case "blocked-insecure":
+			return { ok: false, detail: "Blocked: server URL is not https" };
+	}
+};
+
+const describeConnectionFailure = (error: unknown): string => {
+	const message = error instanceof Error ? error.message : String(error);
+	if (message.includes("https")) return "Blocked: insecure server URL";
+	const statusMatch = message.match(/(\d{3})\b/);
+	return statusMatch
+		? `Connection failed (${statusMatch[1]})`
+		: "Connection failed";
+};
+
+// Best-effort CalDAV auto-link: matches the finished recording to a calendar
+// event and appends the share link via ATTACH. Never throws into the caller
+// — every failure (network, auth, ambiguous/no match, stale etag) is
+// recorded to lastCalendarLink rather than surfaced, since this is an
+// enrichment on top of an already-completed upload, not part of the
+// recording-completed UX.
+const linkRecordingToCalendar = async (
+	meetingUrl: string,
+	startedAt: number,
+	durationMs: number,
+	shareUrl: string,
+): Promise<void> => {
+	const settings = await loadSettings();
+	if (!settings.caldav.enabled || !settings.caldav.serverUrl) return;
+
+	try {
+		const { start, end } = matchWindowFor(startedAt, durationMs);
+		const rawEvents = await queryEventsInWindow(settings.caldav, start, end);
+		const events = rawEvents.map(parseEvent);
+		const match = matchCalendarEvent(events, meetingUrl, startedAt);
+		if (!match) {
+			await saveLastCalendarLink({
+				at: Date.now(),
+				ok: false,
+				detail: "No matching event",
+			});
+			return;
+		}
+
+		// A 412 (conflict) result means the event changed since it was read;
+		// treated as skip, not retried.
+		const result = await attachShareLinkToEvent(
+			settings.caldav,
+			match,
+			shareUrl,
+		);
+		await saveLastCalendarLink({
+			at: Date.now(),
+			...describeAttachResult(result, match.summary),
+		});
+	} catch (error) {
+		await saveLastCalendarLink({
+			at: Date.now(),
+			ok: false,
+			detail: describeConnectionFailure(error),
+		});
+	}
+};
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 	if (isRecordingStatusBroadcast(message)) {
 		setRecordingStatusAndBroadcast(message.status);
@@ -1856,6 +1954,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 					return updateTab(tabId, shareUrl);
 				})
 				.catch(() => undefined);
+
+			// Fire-and-forget: no existing chrome.notifications permission or
+			// in-extension toast surface for a "linked to <event>" confirmation
+			// (grepped — none), so per plan this stays silent rather than
+			// growing the manifest/adding a dependency for one message.
+			const { meetingUrl, startedAt, durationMs } = message.status;
+			if (meetingUrl && startedAt !== undefined && durationMs !== undefined) {
+				void linkRecordingToCalendar(
+					meetingUrl,
+					startedAt,
+					durationMs,
+					shareUrl,
+				).catch(() => undefined);
+			}
 		}
 		return false;
 	}

@@ -43,6 +43,12 @@ const settings: ExtensionSettings = {
 	microphoneWarning: {
 		enabled: true,
 	},
+	caldav: {
+		enabled: false,
+		serverUrl: "",
+		username: "",
+		appPassword: "",
+	},
 };
 
 describe("camera preferences", () => {

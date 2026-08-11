@@ -128,6 +128,9 @@ type ActiveRecording = {
 	// streaming upload continues untouched.
 	spoolFailed: boolean;
 	memoryBackup: LocalRecordingState;
+	// Detected meeting URL for "tab" mode recordings, carried through to the
+	// "completed" status so the service worker can run CalDAV auto-link.
+	meetingUrl: string | null;
 };
 
 let activeRecording: ActiveRecording | null = null;
@@ -1008,6 +1011,7 @@ const startRecording = async (request: StartRecordingRequest) => {
 			cleanedUp: false,
 			spoolFailed: false,
 			memoryBackup: initialLocalRecordingState(),
+			meetingUrl: request.mode === "tab" ? (request.meetingUrl ?? null) : null,
 		};
 
 		ownedRecording = recording;
@@ -1285,6 +1289,9 @@ const finalizeRecording = async (recording: ActiveRecording) => {
 			phase: "completed",
 			videoId: recording.videoId,
 			shareUrl: recording.shareUrl,
+			meetingUrl: recording.meetingUrl,
+			startedAt: recording.startedAt,
+			durationMs: recording.durationMs,
 		};
 		broadcastStatus();
 		return status;
