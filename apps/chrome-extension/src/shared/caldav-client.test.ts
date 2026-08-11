@@ -177,6 +177,27 @@ describe("attachShareLinkToEvent", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	// FIX-A: a same-origin href resolving OUTSIDE the configured collection
+	// path must never be PUT to.
+	it("blocks and does not PUT when the event href resolves off the configured collection path", async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		vi.stubGlobal("btoa", (value: string) => Buffer.from(value).toString("base64"));
+
+		const result = await attachShareLinkToEvent(
+			settings,
+			{
+				href: "/dav/calendars/other-user@example.com/default/x.ics",
+				etag: '"etag-123"',
+				icsText: "BEGIN:VEVENT\r\nEND:VEVENT",
+			},
+			"https://cap.so/s/abc123",
+		);
+
+		expect(result).toBe("blocked-off-path");
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	// FIX-7: never send Basic-auth credentials over a plaintext channel.
 	it("blocks and does not PUT when the server URL is not https", async () => {
 		const fetchMock = vi.fn();
@@ -278,6 +299,34 @@ describe("parseEvent DURATION fallback", () => {
 			etag: '"etag-1"',
 			icsText:
 				"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Standup\r\nDTSTART:20260810T140000Z\r\nDURATION:PT1H\r\nEND:VEVENT\r\nEND:VCALENDAR",
+		});
+
+		expect(parsed.dtstartMs).toBe(Date.UTC(2026, 7, 10, 14, 0, 0));
+		expect(parsed.dtendMs).toBe(Date.UTC(2026, 7, 10, 15, 0, 0));
+	});
+
+	// FIX-B: RFC5545 allows an optional leading sign on DURATION. A negative
+	// duration must not produce an end-before-start dtendMs; treat as no
+	// valid end (fall back to null), same as an absent/unparseable DURATION.
+	it("treats a negative-signed DURATION as no valid end", () => {
+		const parsed = parseEvent({
+			href: "/e1.ics",
+			etag: '"etag-1"',
+			icsText:
+				"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Standup\r\nDTSTART:20260810T140000Z\r\nDURATION:-PT1H\r\nEND:VEVENT\r\nEND:VCALENDAR",
+		});
+
+		expect(parsed.dtstartMs).toBe(Date.UTC(2026, 7, 10, 14, 0, 0));
+		expect(parsed.dtendMs).toBeNull();
+	});
+
+	// A leading "+" is legal and behaves identically to unsigned.
+	it("computes dtendMs from DTSTART + DURATION for an explicitly positive-signed DURATION", () => {
+		const parsed = parseEvent({
+			href: "/e1.ics",
+			etag: '"etag-1"',
+			icsText:
+				"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Standup\r\nDTSTART:20260810T140000Z\r\nDURATION:+PT1H\r\nEND:VEVENT\r\nEND:VCALENDAR",
 		});
 
 		expect(parsed.dtstartMs).toBe(Date.UTC(2026, 7, 10, 14, 0, 0));

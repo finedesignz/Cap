@@ -276,10 +276,11 @@ const parseIcsDate = (
 const parseIsoDuration = (value: string | null): number | null => {
 	if (!value) return null;
 	const match = value.match(
-		/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/,
+		/^([+-])?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/,
 	);
 	if (!match) return null;
-	const [, days, hours, minutes, seconds] = match;
+	const [, sign, days, hours, minutes, seconds] = match;
+	if (sign === "-") return null;
 	if (!days && !hours && !minutes && !seconds) return null;
 	return (
 		(Number(days ?? 0) * 86400 +
@@ -319,6 +320,7 @@ export type AttachResult =
 	| "attached"
 	| "conflict"
 	| "blocked-off-origin"
+	| "blocked-off-path"
 	| "blocked-no-etag"
 	| "blocked-insecure";
 
@@ -372,9 +374,20 @@ export const attachShareLinkToEvent = async (
 ): Promise<AttachResult> => {
 	if (!isHttpsUrl(settings.serverUrl)) return "blocked-insecure";
 
-	const serverOrigin = new URL(settings.serverUrl).origin;
-	const url = new URL(event.href, settings.serverUrl);
-	if (url.origin !== serverOrigin) return "blocked-off-origin";
+	let url: URL;
+	try {
+		const serverOrigin = new URL(settings.serverUrl).origin;
+		url = new URL(event.href, settings.serverUrl);
+		if (url.origin !== serverOrigin) return "blocked-off-origin";
+
+		const collectionPath = new URL(settings.serverUrl).pathname.replace(
+			/\/?$/,
+			"/",
+		);
+		if (!url.pathname.startsWith(collectionPath)) return "blocked-off-path";
+	} catch {
+		return "blocked-off-origin";
+	}
 
 	if (!event.etag) return "blocked-no-etag";
 

@@ -1866,6 +1866,8 @@ const describeAttachResult = (
 			return { ok: false, detail: "Event changed since read (skipped)" };
 		case "blocked-off-origin":
 			return { ok: false, detail: "Blocked: off-origin target" };
+		case "blocked-off-path":
+			return { ok: false, detail: "Blocked: off-origin target" };
 		case "blocked-no-etag":
 			return {
 				ok: false,
