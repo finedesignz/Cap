@@ -117,6 +117,16 @@ export type CalDavSettings = {
 	appPassword: string;
 };
 
+// Passive last-result status for the CalDAV auto-link background attempt —
+// surfaced in the Calendar settings section so success/failure isn't silent.
+// `detail` is a short human-readable summary; never the app-password or any
+// credential.
+export type CalendarLinkResult = {
+	at: number;
+	ok: boolean;
+	detail: string;
+};
+
 export type ExtensionSettings = {
 	apiBaseUrl: string;
 	capture: CapturePreferences;
