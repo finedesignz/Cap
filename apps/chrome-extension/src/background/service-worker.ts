@@ -10,6 +10,7 @@ import {
 	isServiceWorkerRequest,
 } from "../shared/messages";
 import {
+	type AttachResult,
 	attachShareLinkToEvent,
 	parseEvent,
 	queryEventsInWindow,
@@ -36,6 +37,7 @@ import {
 	saveAuth,
 	saveAuthError,
 	saveCachedBootstrap,
+	saveLastCalendarLink,
 	savePendingAuth,
 	saveSettings,
 	saveSharedRecordingState,
@@ -1847,11 +1849,48 @@ const handleRequest = async (
 	return { ok: false, error: "Unknown request" };
 };
 
+// Human-readable summary for the passive lastCalendarLink status surfaced in
+// the Calendar settings section — never includes the app-password or any
+// other credential.
+const describeAttachResult = (
+	result: AttachResult,
+	summary: string | null,
+): { ok: boolean; detail: string } => {
+	switch (result) {
+		case "attached":
+			return {
+				ok: true,
+				detail: summary ? `Linked to: ${summary}` : "Linked to event",
+			};
+		case "conflict":
+			return { ok: false, detail: "Event changed since read (skipped)" };
+		case "blocked-off-origin":
+			return { ok: false, detail: "Blocked: off-origin target" };
+		case "blocked-no-etag":
+			return {
+				ok: false,
+				detail: "Blocked: server did not provide an etag",
+			};
+		case "blocked-insecure":
+			return { ok: false, detail: "Blocked: server URL is not https" };
+	}
+};
+
+const describeConnectionFailure = (error: unknown): string => {
+	const message = error instanceof Error ? error.message : String(error);
+	if (message.includes("https")) return "Blocked: insecure server URL";
+	const statusMatch = message.match(/(\d{3})\b/);
+	return statusMatch
+		? `Connection failed (${statusMatch[1]})`
+		: "Connection failed";
+};
+
 // Best-effort CalDAV auto-link: matches the finished recording to a calendar
 // event and appends the share link via ATTACH. Never throws into the caller
-// — every failure (network, auth, ambiguous/no match, stale etag) is a
-// silent no-op, since this is an enrichment on top of an already-completed
-// upload, not part of the recording-completed UX.
+// — every failure (network, auth, ambiguous/no match, stale etag) is
+// recorded to lastCalendarLink rather than surfaced, since this is an
+// enrichment on top of an already-completed upload, not part of the
+// recording-completed UX.
 const linkRecordingToCalendar = async (
 	meetingUrl: string,
 	startedAt: number,
@@ -1861,15 +1900,38 @@ const linkRecordingToCalendar = async (
 	const settings = await loadSettings();
 	if (!settings.caldav.enabled || !settings.caldav.serverUrl) return;
 
-	const { start, end } = matchWindowFor(startedAt, durationMs);
-	const rawEvents = await queryEventsInWindow(settings.caldav, start, end);
-	const events = rawEvents.map(parseEvent);
-	const match = matchCalendarEvent(events, meetingUrl, startedAt);
-	if (!match) return;
+	try {
+		const { start, end } = matchWindowFor(startedAt, durationMs);
+		const rawEvents = await queryEventsInWindow(settings.caldav, start, end);
+		const events = rawEvents.map(parseEvent);
+		const match = matchCalendarEvent(events, meetingUrl, startedAt);
+		if (!match) {
+			await saveLastCalendarLink({
+				at: Date.now(),
+				ok: false,
+				detail: "No matching event",
+			});
+			return;
+		}
 
-	// A 412 (conflict) result means the event changed since it was read;
-	// treated as skip, not retried.
-	await attachShareLinkToEvent(settings.caldav, match, shareUrl);
+		// A 412 (conflict) result means the event changed since it was read;
+		// treated as skip, not retried.
+		const result = await attachShareLinkToEvent(
+			settings.caldav,
+			match,
+			shareUrl,
+		);
+		await saveLastCalendarLink({
+			at: Date.now(),
+			...describeAttachResult(result, match.summary),
+		});
+	} catch (error) {
+		await saveLastCalendarLink({
+			at: Date.now(),
+			ok: false,
+			detail: describeConnectionFailure(error),
+		});
+	}
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
