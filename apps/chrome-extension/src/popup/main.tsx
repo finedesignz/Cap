@@ -15,6 +15,7 @@ import {
 	loadAuth,
 	loadCachedBootstrap,
 	loadFailedRecordings,
+	loadLastCalendarLink,
 	loadMediaAccessState,
 	loadSettings,
 	MEDIA_ACCESS_KEY,
@@ -24,6 +25,7 @@ import {
 } from "../shared/storage";
 import type {
 	BootstrapData,
+	CalendarLinkResult,
 	CameraDevice,
 	ExtensionAuth,
 	ExtensionSettings,
@@ -115,6 +117,8 @@ function App() {
 	const [cameraSelectOpen, setCameraSelectOpen] = useState(false);
 	const [micSelectOpen, setMicSelectOpen] = useState(false);
 	const [failedRecordingsCount, setFailedRecordingsCount] = useState(0);
+	const [lastCalendarLink, setLastCalendarLink] =
+		useState<CalendarLinkResult | null>(null);
 	const settingsRef = useRef(defaultSettings);
 
 	const recordingActive = isRecordingStatus(status);
@@ -278,14 +282,22 @@ function App() {
 			loadAuth(),
 			loadCachedBootstrap(),
 			loadMediaAccessState(),
+			loadLastCalendarLink(),
 		])
 			.then(
-				([cachedSettings, cachedAuth, cachedBootstrap, cachedMediaAccess]) => {
+				([
+					cachedSettings,
+					cachedAuth,
+					cachedBootstrap,
+					cachedMediaAccess,
+					cachedLastCalendarLink,
+				]) => {
 					if (disposed || !cachedAuth) return;
 					applySettings(cachedSettings);
 					setAuth(cachedAuth);
 					setBootstrap(cachedBootstrap);
 					setMediaAccess(cachedMediaAccess);
+					setLastCalendarLink(cachedLastCalendarLink);
 					setBootstrapped(true);
 				},
 			)
@@ -685,6 +697,7 @@ function App() {
 								<CalendarSettings
 									settings={settings.caldav}
 									disabled={recordingActive || busy}
+									lastCalendarLink={lastCalendarLink}
 									onChange={(caldav) =>
 										void updateSettings({ ...settings, caldav })
 									}
