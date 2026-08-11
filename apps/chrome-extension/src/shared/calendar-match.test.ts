@@ -8,6 +8,7 @@ const baseEvent = (
 	href: "/calendars/user/default/event.ics",
 	etag: '"etag-1"',
 	icsText: "",
+	uid: null,
 	summary: null,
 	location: null,
 	description: null,
