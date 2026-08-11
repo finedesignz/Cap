@@ -34,6 +34,7 @@ import type {
 	RecordingStatus,
 } from "../shared/types";
 import { DEFAULT_MICROPHONE_DEVICE_ID } from "../shared/types";
+import { CalendarSettings } from "./components/calendar-settings";
 import { CameraSelector } from "./components/camera-selector";
 import { DashboardButton } from "./components/dashboard-button";
 import { HowItWorksButton } from "./components/how-it-works-button";
@@ -675,6 +676,17 @@ function App() {
 											...settings,
 											systemAudio: { ...settings.systemAudio, enabled },
 										})
+									}
+								/>
+							</div>
+						)}
+						{mode === "tab" && (
+							<div className="cap-fade-up cap-fade-up-4">
+								<CalendarSettings
+									settings={settings.caldav}
+									disabled={recordingActive || busy}
+									onChange={(caldav) =>
+										void updateSettings({ ...settings, caldav })
 									}
 								/>
 							</div>
