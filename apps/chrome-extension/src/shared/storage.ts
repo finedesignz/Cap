@@ -89,6 +89,12 @@ export const defaultSettings: ExtensionSettings = {
 	microphoneWarning: {
 		enabled: true,
 	},
+	caldav: {
+		enabled: false,
+		serverUrl: "",
+		username: "",
+		appPassword: "",
+	},
 };
 
 const defaultMediaAccessState: MediaAccessState = {
@@ -173,6 +179,7 @@ export const loadSettings = async () => {
 		microphoneWarning: normalizeMicrophoneWarningSettings(
 			saved.microphoneWarning,
 		),
+		caldav: normalizeCalDavSettings(saved.caldav),
 	};
 };
 
@@ -505,6 +512,34 @@ export const updateSharedUiState = (
 		await saveSharedUiState(next);
 		return next;
 	});
+
+const normalizeCalDavSettings = (
+	value: unknown,
+): ExtensionSettings["caldav"] => {
+	const caldav =
+		value && typeof value === "object"
+			? (value as Partial<ExtensionSettings["caldav"]>)
+			: {};
+
+	return {
+		enabled:
+			typeof caldav.enabled === "boolean"
+				? caldav.enabled
+				: defaultSettings.caldav.enabled,
+		serverUrl:
+			typeof caldav.serverUrl === "string"
+				? caldav.serverUrl
+				: defaultSettings.caldav.serverUrl,
+		username:
+			typeof caldav.username === "string"
+				? caldav.username
+				: defaultSettings.caldav.username,
+		appPassword:
+			typeof caldav.appPassword === "string"
+				? caldav.appPassword
+				: defaultSettings.caldav.appPassword,
+	};
+};
 
 const isSettings = (value: unknown): value is ExtensionSettings => {
 	if (!value || typeof value !== "object") return false;
